@@ -46,7 +46,7 @@
           <select v-model="productsStore.filters.category" class="select">
             <option value="">{{ t('allCategories') }}</option>
             <option v-for="cat in productsStore.categories" :key="cat.value" :value="cat.value">
-              {{ t(cat.value) }}
+              {{ cat.label }}
             </option>
           </select>
         </div>
@@ -95,9 +95,10 @@
       <div class="sort-controls">
         <label>{{ t('sortBy') }}:</label>
         <select v-model="productsStore.sortBy" class="select">
-          <option value="releaseDate">{{ t('releaseDate') }}</option>
+          <option value="productDate">{{ t('releaseDate') }}</option>
           <option value="price">{{ t('price') }}</option>
-          <option value="hotScore">{{ t('hotScore') }}</option>
+          <option value="salesGrowth">Sales Growth</option>
+          <option value="salesCount">Sales Count</option>
         </select>
 
         <select v-model="productsStore.sortOrder" class="select">
@@ -128,25 +129,37 @@
         class="product-card"
       >
         <div class="product-image-wrapper">
-          <img :src="product.image" :alt="product.name" class="product-image" />
+          <img :src="product.productImageUrl || product.s3ImageUrl" :alt="product.productTitle" class="product-image" @error="handleImageError" />
           <span v-if="product.isHot" class="hot-badge">🔥 {{ t('hot') }}</span>
         </div>
         
         <div class="product-info">
           <div class="product-brand">{{ product.brand }}</div>
-          <h3 class="product-name">{{ product.name }}</h3>
+          <h3 class="product-name" :title="product.productTitle">{{ product.productTitle }}</h3>
           <div class="product-category">
-            <span class="badge badge-primary">{{ t(product.category) }}</span>
+            <span 
+              v-for="cat in product.productPrimaryCategory" 
+              :key="cat" 
+              class="badge badge-primary"
+            >
+              {{ cat }}
+            </span>
           </div>
           <div class="product-meta">
-            <div class="product-price">${{ product.price }}</div>
-            <div class="product-score">
-              <span class="score-label">{{ t('hotScore') }}:</span>
-              <span class="score-value">{{ product.hotScore }}</span>
+            <div class="product-price">{{ product.price }}</div>
+            <div class="product-sales">
+              <span class="sales-label">📈</span>
+              <span class="sales-value">{{ product.salesCountStr }}</span>
             </div>
           </div>
+          <div class="product-growth">
+            <span class="growth-label">Sales Growth:</span>
+            <span class="growth-value" :class="{ positive: product.salesGrowth > 50 }">
+              {{ product.salesGrowth }}%
+            </span>
+          </div>
           <div class="product-date">
-            {{ formatDate(product.releaseDate) }}
+            {{ formatDate(product.productDate) }}
           </div>
           <button @click="viewProductDetails(product)" class="btn btn-primary btn-full">
             {{ t('viewDetails') }}
@@ -166,11 +179,11 @@
     <div v-if="selectedProduct" class="modal-overlay" @click="closeModal">
       <div class="modal" @click.stop>
         <div class="modal-header">
-          <h2>{{ selectedProduct.name }}</h2>
+          <h2>{{ selectedProduct.productTitle }}</h2>
           <button @click="closeModal" class="close-btn">✕</button>
         </div>
         <div class="modal-body">
-          <img :src="selectedProduct.image" :alt="selectedProduct.name" class="modal-image" />
+          <img :src="selectedProduct.productImageUrl || selectedProduct.s3ImageUrl" :alt="selectedProduct.productTitle" class="modal-image" @error="handleImageError" />
           <div class="modal-info">
             <div class="info-row">
               <span class="info-label">{{ t('brand') }}:</span>
@@ -178,23 +191,35 @@
             </div>
             <div class="info-row">
               <span class="info-label">{{ t('category') }}:</span>
-              <span class="info-value">{{ t(selectedProduct.category) }}</span>
+              <span class="info-value">{{ selectedProduct.productPrimaryCategory?.join(', ') }}</span>
             </div>
             <div class="info-row">
               <span class="info-label">{{ t('price') }}:</span>
-              <span class="info-value">${{ selectedProduct.price }}</span>
+              <span class="info-value">{{ selectedProduct.price }}</span>
             </div>
             <div class="info-row">
-              <span class="info-label">{{ t('hotScore') }}:</span>
-              <span class="info-value">{{ selectedProduct.hotScore }}</span>
+              <span class="info-label">Sales Count:</span>
+              <span class="info-value">{{ selectedProduct.salesCountStr }}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Sales Growth:</span>
+              <span class="info-value">{{ selectedProduct.salesGrowth }}%</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Rating:</span>
+              <span class="info-value">{{ selectedProduct.rating }} ⭐ ({{ selectedProduct.numReviews }} reviews)</span>
             </div>
             <div class="info-row">
               <span class="info-label">{{ t('releaseDate') }}:</span>
-              <span class="info-value">{{ formatDate(selectedProduct.releaseDate) }}</span>
+              <span class="info-value">{{ formatDate(selectedProduct.productDate) }}</span>
             </div>
             <div class="info-row">
-              <span class="info-label">Description:</span>
-              <span class="info-value">{{ selectedProduct.description }}</span>
+              <span class="info-label">Product URL:</span>
+              <span class="info-value">
+                <a :href="selectedProduct.productUrl" target="_blank" class="product-link">
+                  View on {{ selectedProduct.brand }}
+                </a>
+              </span>
             </div>
           </div>
         </div>
@@ -246,6 +271,11 @@ const formatDate = (dateString) => {
     month: 'short', 
     day: 'numeric' 
   })
+}
+
+const handleImageError = (e) => {
+  // Fallback to a placeholder image if image fails to load
+  e.target.src = 'https://via.placeholder.com/400x500/e2e8f0/64748b?text=Product+Image'
 }
 
 onMounted(() => {
@@ -463,10 +493,24 @@ onMounted(() => {
   margin: 0 0 0.5rem 0;
   color: var(--text-primary);
   line-height: 1.4;
+  /* 限制显示2行，超出显示省略号 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* 固定高度确保布局一致 */
+  min-height: 2.8rem; /* 1.4 line-height * 2 lines * 1rem */
+  max-height: 2.8rem;
+  cursor: help;
 }
 
 .product-category {
   margin-bottom: 0.75rem;
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .product-meta {
@@ -482,20 +526,41 @@ onMounted(() => {
   color: var(--primary-color);
 }
 
-.product-score {
+.product-sales {
   display: flex;
   align-items: center;
   gap: 0.25rem;
   font-size: 0.875rem;
 }
 
-.score-label {
+.sales-label {
+  font-size: 1rem;
+}
+
+.sales-value {
+  font-weight: 600;
+  color: var(--success-color);
+}
+
+.product-growth {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  margin-bottom: 0.5rem;
+}
+
+.growth-label {
   color: var(--text-secondary);
 }
 
-.score-value {
+.growth-value {
   font-weight: 600;
-  color: var(--warning-color);
+  color: var(--text-secondary);
+}
+
+.growth-value.positive {
+  color: var(--success-color);
 }
 
 .product-date {
@@ -581,6 +646,15 @@ onMounted(() => {
 
 .info-value {
   color: var(--text-primary);
+}
+
+.product-link {
+  color: var(--primary-color);
+  text-decoration: none;
+}
+
+.product-link:hover {
+  text-decoration: underline;
 }
 </style>
 

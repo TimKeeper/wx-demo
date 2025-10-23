@@ -12,7 +12,7 @@ export const useProductsStore = defineStore('products', () => {
     dateTo: '',
     hotOnly: false
   })
-  const sortBy = ref('releaseDate') // releaseDate, price, hotScore
+  const sortBy = ref('productDate') // productDate, price, salesGrowth, salesCount
   const sortOrder = ref('desc') // asc, desc
 
   const filteredProducts = computed(() => {
@@ -22,9 +22,9 @@ export const useProductsStore = defineStore('products', () => {
     if (filters.value.search) {
       const searchLower = filters.value.search.toLowerCase()
       result = result.filter(p => 
-        p.name.toLowerCase().includes(searchLower) ||
+        p.productTitle.toLowerCase().includes(searchLower) ||
         p.brand.toLowerCase().includes(searchLower) ||
-        p.description.toLowerCase().includes(searchLower)
+        p.normTitle.toLowerCase().includes(searchLower)
       )
     }
 
@@ -35,18 +35,21 @@ export const useProductsStore = defineStore('products', () => {
 
     // Category filter
     if (filters.value.category) {
-      result = result.filter(p => p.category === filters.value.category)
+      result = result.filter(p => {
+        const categories = p.productPrimaryCategory || []
+        return categories.some(cat => cat.toLowerCase() === filters.value.category.toLowerCase())
+      })
     }
 
     // Date range filter
     if (filters.value.dateFrom) {
       result = result.filter(p => 
-        new Date(p.releaseDate) >= new Date(filters.value.dateFrom)
+        new Date(p.productDate) >= new Date(filters.value.dateFrom)
       )
     }
     if (filters.value.dateTo) {
       result = result.filter(p => 
-        new Date(p.releaseDate) <= new Date(filters.value.dateTo)
+        new Date(p.productDate) <= new Date(filters.value.dateTo)
       )
     }
 
@@ -60,9 +63,13 @@ export const useProductsStore = defineStore('products', () => {
       let aVal = a[sortBy.value]
       let bVal = b[sortBy.value]
 
-      if (sortBy.value === 'releaseDate') {
+      if (sortBy.value === 'productDate') {
         aVal = new Date(aVal)
         bVal = new Date(bVal)
+      } else if (sortBy.value === 'price') {
+        // Remove $ and convert to number
+        aVal = parseFloat(aVal.replace('$', ''))
+        bVal = parseFloat(bVal.replace('$', ''))
       }
 
       if (sortOrder.value === 'asc') {
@@ -81,11 +88,17 @@ export const useProductsStore = defineStore('products', () => {
   })
 
   const categories = computed(() => {
-    return [
-      { value: 'tops', label: 'Tops' },
-      { value: 'bottoms', label: 'Bottoms' },
-      { value: 'dress', label: 'Dress' }
-    ]
+    // Get unique categories from products
+    const uniqueCategories = new Set()
+    products.value.forEach(p => {
+      if (p.productPrimaryCategory) {
+        p.productPrimaryCategory.forEach(cat => uniqueCategories.add(cat))
+      }
+    })
+    return Array.from(uniqueCategories).sort().map(cat => ({
+      value: cat,
+      label: cat
+    }))
   })
 
   const hotProducts = computed(() => {
@@ -125,18 +138,20 @@ export const useProductsStore = defineStore('products', () => {
       link.click()
       URL.revokeObjectURL(url)
     } else if (format === 'csv') {
-      const headers = ['ID', 'Brand', 'Name', 'Category', 'Price', 'Hot Score', 'Release Date']
+      const headers = ['ID', 'Brand', 'Title', 'Category', 'Price', 'Sales Count', 'Sales Growth', 'Release Date']
       const csvRows = [headers.join(',')]
       
       data.forEach(product => {
+        const category = product.productPrimaryCategory ? product.productPrimaryCategory.join(';') : ''
         const row = [
           product.id,
           product.brand,
-          `"${product.name}"`,
-          product.category,
+          `"${product.productTitle}"`,
+          category,
           product.price,
-          product.hotScore,
-          new Date(product.releaseDate).toLocaleDateString()
+          product.salesCount,
+          product.salesGrowth,
+          new Date(product.productDate).toLocaleDateString()
         ]
         csvRows.push(row.join(','))
       })
